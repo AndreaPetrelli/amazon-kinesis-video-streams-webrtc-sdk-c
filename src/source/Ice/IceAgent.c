@@ -40,12 +40,8 @@ STATUS createIceAgent(PCHAR username, PCHAR password, PIceAgentCallbacks pIceAge
     STRNCPY(pIceAgent->localUsername, username, MAX_ICE_CONFIG_USER_NAME_LEN);
     STRNCPY(pIceAgent->localPassword, password, MAX_ICE_CONFIG_CREDENTIAL_LEN);
 
-    ATOMIC_STORE_BOOL(&pIceAgent->remoteCredentialReceived, FALSE);
-    ATOMIC_STORE_BOOL(&pIceAgent->agentStartGathering, FALSE);
-    ATOMIC_STORE_BOOL(&pIceAgent->candidateGatheringFinished, FALSE);
-    ATOMIC_STORE_BOOL(&pIceAgent->shutdown, FALSE);
-    ATOMIC_STORE_BOOL(&pIceAgent->restart, FALSE);
-    ATOMIC_STORE_BOOL(&pIceAgent->processStun, TRUE);
+
+
     pIceAgent->isControlling = FALSE;
     pIceAgent->tieBreaker = (UINT64) RAND();
     pIceAgent->iceTransportPolicy = pRtcConfiguration->iceTransportPolicy;
@@ -444,8 +440,10 @@ CleanUp:
     if (STATUS_FAILED(retStatus) && freeIceCandidateIfFail) {
         SAFE_MEMFREE(pIceCandidate);
     }
-
-    CHK_LOG_ERR(retStatus);
+    // Parsing TCP candidates is not an error, so do not log as error because that is misleading
+    if(retStatus != STATUS_ICE_CANDIDATE_STRING_IS_TCP) {
+        CHK_LOG_ERR(retStatus);
+    }
 
     LEAVES();
     return retStatus;
@@ -584,11 +582,11 @@ STATUS iceAgentStartGathering(PIceAgent pIceAgent)
 
     ATOMIC_STORE_BOOL(&pIceAgent->agentStartGathering, TRUE);
 
-    CHK_STATUS(getLocalhostIpAddresses(pIceAgent->localNetworkInterfaces, &pIceAgent->localNetworkInterfaceCount,
-                                       pIceAgent->kvsRtcConfiguration.iceSetInterfaceFilterFunc, pIceAgent->kvsRtcConfiguration.filterCustomData));
-
     // skip gathering host candidate and srflx candidate if relay only
     if (pIceAgent->iceTransportPolicy != ICE_TRANSPORT_POLICY_RELAY) {
+        // Skip getting local host candidates if transport policy is relay only
+        PROFILE_CALL(getLocalhostIpAddresses(pIceAgent->localNetworkInterfaces, &pIceAgent->localNetworkInterfaceCount,
+                                                        pIceAgent->kvsRtcConfiguration.iceSetInterfaceFilterFunc, pIceAgent->kvsRtcConfiguration.filterCustomData), "Candidate gathering");
         CHK_STATUS(iceAgentInitHostCandidate(pIceAgent));
         CHK_STATUS(iceAgentInitSrflxCandidate(pIceAgent));
     }
@@ -1709,14 +1707,20 @@ STATUS iceAgentInitSrflxCandidate(PIceAgent pIceAgent)
     // Create and start the connection listener outside of the locks
     for (j = 0; j < srflxCount; j++) {
         pCandidate = srflsCandidates[j];
-        // open up a new socket at host candidate's ip address for server reflex candidate.
-        // the new port will be stored in pNewCandidate->ipAddress.port. And the Ip address will later be updated
-        // with the correct ip address once the STUN response is received.
-        CHK_STATUS(createSocketConnection(pCandidate->ipAddress.family, KVS_SOCKET_PROTOCOL_UDP, &pCandidate->ipAddress, NULL, (UINT64) pIceAgent,
-                                          incomingDataHandler, pIceAgent->kvsRtcConfiguration.sendBufSize, &pCandidate->pSocketConnection));
-        ATOMIC_STORE_BOOL(&pCandidate->pSocketConnection->receiveData, TRUE);
-        // connectionListener will free the pSocketConnection at the end.
-        CHK_STATUS(connectionListenerAddConnection(pIceAgent->pConnectionListener, pCandidate->pSocketConnection));
+        // TODO: IPv6 STUN is not supported at the moment. Remove this check if the support is added in the future
+        if(IS_IPV4_ADDR(&(pCandidate->ipAddress))) {
+            // open up a new socket at host candidate's ip address for server reflex candidate.
+            // the new port will be stored in pNewCandidate->ipAddress.port. And the Ip address will later be updated
+            // with the correct ip address once the STUN response is received.
+            CHK_STATUS(createSocketConnection(pCandidate->ipAddress.family, KVS_SOCKET_PROTOCOL_UDP, &pCandidate->ipAddress, NULL, (UINT64) pIceAgent,
+                                              incomingDataHandler, pIceAgent->kvsRtcConfiguration.sendBufSize, &pCandidate->pSocketConnection));
+            ATOMIC_STORE_BOOL(&pCandidate->pSocketConnection->receiveData, TRUE);
+            // connectionListener will free the pSocketConnection at the end.
+            CHK_STATUS(connectionListenerAddConnection(pIceAgent->pConnectionListener, pCandidate->pSocketConnection));
+
+        } else {
+            DLOGW("IPv6 candidate detected, ignoring....");
+        }
     }
 
 CleanUp:

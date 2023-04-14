@@ -60,6 +60,9 @@ VOID onConnectionStateChange(UINT64 customData, RTC_PEER_CONNECTION_STATE newSta
             }
             break;
         case RTC_PEER_CONNECTION_STATE_FAILED:
+            // TODO: evaluate invoking restart ICE agent in case the SDK acts as the viewer
+            // DLOGI("Restarting ICE since disconnection has been detected");
+            // CHK_STATUS(restartIce(pSampleStreamingSession->pPeerConnection));
             // explicit fallthrough
         case RTC_PEER_CONNECTION_STATE_CLOSED:
             // explicit fallthrough
@@ -70,6 +73,7 @@ VOID onConnectionStateChange(UINT64 customData, RTC_PEER_CONNECTION_STATE newSta
         default:
             ATOMIC_STORE_BOOL(&pSampleConfiguration->connected, FALSE);
             CVAR_BROADCAST(pSampleConfiguration->cvar);
+
             break;
     }
 
@@ -217,7 +221,7 @@ STATUS handleOffer(PSampleConfiguration pSampleConfiguration, PSampleStreamingSe
      * If remote support trickle ice, send answer now. Otherwise answer will be sent once ice candidate gathering is complete.
      */
     if (pSampleStreamingSession->remoteCanTrickleIce) {
-        CHK_STATUS(createAnswer(pSampleStreamingSession->pPeerConnection, &pSampleStreamingSession->answerSessionDescriptionInit));
+        PROFILE_CALL(createAnswer(pSampleStreamingSession->pPeerConnection, &pSampleStreamingSession->answerSessionDescriptionInit), "Answer generation");
         CHK_STATUS(respondWithAnswer(pSampleStreamingSession));
         DLOGD("time taken to send answer %" PRIu64 " ms",
               (GETTIME() - pSampleStreamingSession->offerReceiveTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
@@ -344,7 +348,7 @@ STATUS initializePeerConnection(PSampleConfiguration pSampleConfiguration, PRtcP
     RtcConfiguration configuration;
     UINT32 i, j, iceConfigCount, uriCount = 0, maxTurnServer = 1;
     PIceConfigInfo pIceConfigInfo;
-    UINT64 data, curTime;
+    UINT64 data;
     PRtcCertificate pRtcCertificate = NULL;
 
     CHK(pSampleConfiguration != NULL && ppRtcPeerConnection != NULL, STATUS_NULL_ARG);
@@ -367,7 +371,7 @@ STATUS initializePeerConnection(PSampleConfiguration pSampleConfiguration, PRtcP
         /* signalingClientGetIceConfigInfoCount can return more than one turn server. Use only one to optimize
          * candidate gathering latency. But user can also choose to use more than 1 turn server. */
         for (uriCount = 0, i = 0; i < maxTurnServer; i++) {
-            CHK_STATUS(signalingClientGetIceConfigInfo(pSampleConfiguration->signalingClientHandle, i, &pIceConfigInfo));
+            PROFILE_CALL(signalingClientGetIceConfigInfo(pSampleConfiguration->signalingClientHandle, i, &pIceConfigInfo), "Get ICE Config Info");
             for (j = 0; j < pIceConfigInfo->uriCount; j++) {
                 CHECK(uriCount < MAX_ICE_SERVERS_COUNT);
                 /*
@@ -375,7 +379,7 @@ STATUS initializePeerConnection(PSampleConfiguration pSampleConfiguration, PRtcP
                  * if configuration.iceServers[uriCount + 1].urls is "turn:ip:port?transport=tcp" then ICE will try TURN over TCP/TLS
                  * if configuration.iceServers[uriCount + 1].urls is "turns:ip:port?transport=udp", it's currently ignored because sdk dont do TURN
                  * over DTLS yet. if configuration.iceServers[uriCount + 1].urls is "turns:ip:port?transport=tcp" then ICE will try TURN over TCP/TLS
-                 * if configuration.iceServers[uriCount + 1].urls is "turn:ip:port" then ICE will try both TURN over UPD and TCP/TLS
+                 * if configuration.iceServers[uriCount + 1].urls is "turn:ip:port" then ICE will try both TURN over UDP and TCP/TLS
                  *
                  * It's recommended to not pass too many TURN iceServers to configuration because it will slow down ice gathering in non-trickle mode.
                  */
@@ -404,10 +408,7 @@ STATUS initializePeerConnection(PSampleConfiguration pSampleConfiguration, PRtcP
         configuration.certificates[0] = *pRtcCertificate;
     }
 
-    curTime = GETTIME();
-    CHK_STATUS(createPeerConnection(&configuration, ppRtcPeerConnection));
-    DLOGD("time taken to create peer connection %" PRIu64 " ms", (GETTIME() - curTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
-
+    PROFILE_CALL(createPeerConnection(&configuration, ppRtcPeerConnection), "Create peer connection");
 CleanUp:
 
     CHK_LOG_ERR(retStatus);
@@ -1299,6 +1300,7 @@ STATUS signalingMessageReceived(UINT64 customData, PReceivedSignalingMessage pRe
              * any ice candidate messages queued in pPendingSignalingMessageForRemoteClient. If so then submit
              * all of them.
              */
+
             if (pSampleConfiguration->streamingSessionCount == ARRAY_SIZE(pSampleConfiguration->sampleStreamingSessionList)) {
                 DLOGW("Max simultaneous streaming session count reached.");
 

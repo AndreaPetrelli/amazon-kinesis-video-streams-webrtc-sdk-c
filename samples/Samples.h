@@ -130,6 +130,7 @@ struct __SampleStreamingSession {
     volatile ATOMIC_BOOL terminateFlag;
     volatile ATOMIC_BOOL candidateGatheringDone;
     volatile ATOMIC_BOOL peerIdReceived;
+    volatile ATOMIC_BOOL firstFrame;
     volatile SIZE_T frameIndex;
     PRtcPeerConnection pPeerConnection;
     PRtcRtpTransceiver pVideoRtcRtpTransceiver;
@@ -142,7 +143,6 @@ struct __SampleStreamingSession {
     TID receiveAudioVideoSenderTid;
     UINT64 offerReceiveTime;
     UINT64 startUpLatency;
-    BOOL firstFrame;
     RtcMetricsHistory rtcMetricsHistory;
     BOOL remoteCanTrickleIce;
 

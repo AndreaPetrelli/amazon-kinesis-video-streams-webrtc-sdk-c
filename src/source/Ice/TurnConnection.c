@@ -898,6 +898,7 @@ STATUS turnConnectionStepState(PTurnConnection pTurnConnection)
 
     switch (pTurnConnection->state) {
         case TURN_STATE_NEW:
+            pTurnConnection->turnStateStartTime = GETTIME();
             // create empty turn allocation request
             CHK_STATUS(turnConnectionPackageTurnAllocationRequest(NULL, NULL, NULL, 0, DEFAULT_TURN_ALLOCATION_LIFETIME_SECONDS,
                                                                   &pTurnConnection->pTurnPacket));
@@ -923,6 +924,8 @@ STATUS turnConnectionStepState(PTurnConnection pTurnConnection)
             } else {
                 CHK(currentTime < pTurnConnection->stateTimeoutTime, STATUS_TURN_CONNECTION_STATE_TRANSITION_TIMEOUT);
             }
+            DLOGI("[TURN state socket connection - %s-%s] Time taken %" PRIu64 " ms", pTurnConnection->turnServer.url, CHECK_TRANSPORT(pTurnConnection->turnServer.transport), (GETTIME() - pTurnConnection->turnStateStartTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
+
             break;
 
         // fallthrough here, missing break intended
@@ -947,6 +950,8 @@ STATUS turnConnectionStepState(PTurnConnection pTurnConnection)
             } else {
                 CHK(currentTime < pTurnConnection->stateTimeoutTime, STATUS_TURN_CONNECTION_STATE_TRANSITION_TIMEOUT);
             }
+            DLOGI("[TURN state get credentials - %s-%s] Time taken %" PRIu64 " ms", pTurnConnection->turnServer.url, CHECK_TRANSPORT(pTurnConnection->turnServer.transport), (GETTIME() - pTurnConnection->turnStateStartTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
+
             break;
 
         case TURN_STATE_ALLOCATION:
@@ -999,6 +1004,8 @@ STATUS turnConnectionStepState(PTurnConnection pTurnConnection)
                 CHK(pTurnConnection->stateTryCount < pTurnConnection->stateTryCountMax, STATUS_TURN_CONNECTION_ALLOCAITON_FAILED);
                 CHK(currentTime < pTurnConnection->stateTimeoutTime, STATUS_TURN_CONNECTION_STATE_TRANSITION_TIMEOUT);
             }
+            DLOGI("[TURN state channel allocation - %s-%s] Time taken %" PRIu64 " ms", pTurnConnection->turnServer.url, CHECK_TRANSPORT(pTurnConnection->turnServer.transport), (GETTIME() - pTurnConnection->turnStateStartTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
+
             break;
 
         case TURN_STATE_CREATE_PERMISSION:
@@ -1025,6 +1032,8 @@ STATUS turnConnectionStepState(PTurnConnection pTurnConnection)
                 pTurnConnection->state = TURN_STATE_BIND_CHANNEL;
                 pTurnConnection->stateTimeoutTime = currentTime + DEFAULT_TURN_BIND_CHANNEL_TIMEOUT;
             }
+            DLOGI("[TURN state permission creation - %s-%s] Time taken %" PRIu64 " ms", pTurnConnection->turnServer.url, CHECK_TRANSPORT(pTurnConnection->turnServer.transport), (GETTIME() - pTurnConnection->turnStateStartTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
+
             break;
 
         case TURN_STATE_BIND_CHANNEL:
@@ -1040,6 +1049,7 @@ STATUS turnConnectionStepState(PTurnConnection pTurnConnection)
                 // go to next state if we have at least one ready peer
                 pTurnConnection->state = TURN_STATE_READY;
             }
+            DLOGI("[TURN state channel bind - %s-%s] Time taken %" PRIu64 " ms", pTurnConnection->turnServer.url, CHECK_TRANSPORT(pTurnConnection->turnServer.transport), (GETTIME() - pTurnConnection->turnStateStartTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
             break;
 
         case TURN_STATE_READY:
@@ -1064,6 +1074,7 @@ STATUS turnConnectionStepState(PTurnConnection pTurnConnection)
                                                        (UINT32) ATOMIC_LOAD(&pTurnConnection->timerCallbackId),
                                                        pTurnConnection->currentTimerCallingPeriod));
             }
+            DLOGI("[TURN state ready - %s-%s] Time taken %" PRIu64 " ms", pTurnConnection->turnServer.url, CHECK_TRANSPORT(pTurnConnection->turnServer.transport), (GETTIME() - pTurnConnection->turnStateStartTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
 
             break;
 

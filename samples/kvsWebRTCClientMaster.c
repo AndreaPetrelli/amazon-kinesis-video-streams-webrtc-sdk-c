@@ -2,8 +2,6 @@
 
 extern PSampleConfiguration gSampleConfiguration;
 
-// #define VERBOSE
-
 INT32 main(INT32 argc, CHAR* argv[])
 {
     STATUS retStatus = STATUS_SUCCESS;
@@ -254,6 +252,10 @@ PVOID sendVideoPackets(PVOID args)
         MUTEX_LOCK(pSampleConfiguration->streamingSessionListReadLock);
         for (i = 0; i < pSampleConfiguration->streamingSessionCount; ++i) {
             status = writeFrame(pSampleConfiguration->sampleStreamingSessionList[i]->pVideoRtcRtpTransceiver, &frame);
+            if(pSampleConfiguration->sampleStreamingSessionList[i]->firstFrame) {
+                pSampleConfiguration->sampleStreamingSessionList[i]->firstFrame = FALSE;
+                DLOGD("[Time to first frame] Time taken: %" PRIu64 " ms", (GETTIME() - pSampleConfiguration->sampleStreamingSessionList[i]->offerReceiveTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
+            }
             encoderStats.encodeTimeMsec = 4; // update encode time to an arbitrary number to demonstrate stats update
             updateEncoderStats(pSampleConfiguration->sampleStreamingSessionList[i]->pVideoRtcRtpTransceiver, &encoderStats);
             if (status != STATUS_SRTP_NOT_READY_YET) {

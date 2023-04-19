@@ -233,8 +233,6 @@ STATUS socketBind(PKvsIpAddress pHostIpAddress, INT32 sockfd)
         ipv4Addr.sin_family = AF_INET;
         ipv4Addr.sin_port = 0; // use next available port
         MEMCPY(&ipv4Addr.sin_addr, pHostIpAddress->address, IPV4_ADDRESS_LENGTH);
-        // TODO: Properly handle the non-portable sin_len field if needed per https://issues.amazon.com/KinesisVideo-4952
-        // ipv4Addr.sin_len = SIZEOF(ipv4Addr);
         sockAddr = (struct sockaddr*) &ipv4Addr;
         addrLen = SIZEOF(struct sockaddr_in);
 
@@ -243,8 +241,6 @@ STATUS socketBind(PKvsIpAddress pHostIpAddress, INT32 sockfd)
         ipv6Addr.sin6_family = AF_INET6;
         ipv6Addr.sin6_port = 0; // use next available port
         MEMCPY(&ipv6Addr.sin6_addr, pHostIpAddress->address, IPV6_ADDRESS_LENGTH);
-        // TODO: Properly handle the non-portable sin6_len field if needed per https://issues.amazon.com/KinesisVideo-4952
-        // ipv6Addr.sin6_len = SIZEOF(ipv6Addr);
         sockAddr = (struct sockaddr*) &ipv6Addr;
         addrLen = SIZEOF(struct sockaddr_in6);
     }
@@ -323,7 +319,7 @@ STATUS getIpWithHostName(PCHAR hostname, PKvsIpAddress destIp)
     int i = 0, j = 0;
 
     CHK(hostname != NULL, STATUS_NULL_ARG);
-    DLOGI("[ICE SERVER] Hostname received: %s", hostname);
+    DLOGP("ICE SERVER Hostname received: %s", hostname);
 
     while(hostname[i] != '.') {
         if(hostname[i] >= '0' && hostname[i] <= '9') {
@@ -338,8 +334,8 @@ STATUS getIpWithHostName(PCHAR hostname, PKvsIpAddress destIp)
 
     // If parsing logic failed
     if(addr[0] == '\0') {
-        DLOGW("[ICE SERVER] Parsing for address failed, fallback to getaddrinfo");
-        errCode = getaddrinfo(hostname, NULL, &hint, &res);
+        DLOGW("ICE SERVER parsing for address failed for %s, fallback to getaddrinfo", hostname);
+        errCode = getaddrinfo(hostname, NULL, NULL, &res);
         if (errCode != 0) {
             errStr = errCode == EAI_SYSTEM ? strerror(errno) : (PCHAR) gai_strerror(errCode);
             CHK_ERR(FALSE, STATUS_RESOLVE_HOSTNAME_FAILED, "getaddrinfo() with errno %s", errStr);
@@ -362,7 +358,7 @@ STATUS getIpWithHostName(PCHAR hostname, PKvsIpAddress destIp)
         freeaddrinfo(res);
         CHK_ERR(resolved, STATUS_HOSTNAME_NOT_FOUND, "could not find network address of %s", hostname);
     } else {
-        DLOGW("[ICE SERVER] Address: %s", addr);
+        DLOGI("ICE SERVER Address: %s", addr);
         inet_pton(AF_INET, addr, &inaddr);
         destIp->family = KVS_IP_FAMILY_TYPE_IPV4;
         MEMCPY(destIp->address, &inaddr, IPV4_ADDRESS_LENGTH);

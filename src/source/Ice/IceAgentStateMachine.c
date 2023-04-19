@@ -48,7 +48,7 @@ STATUS stepIceAgentStateMachine(PIceAgent pIceAgent)
 
     if (oldState != pIceAgent->iceAgentState) {
         if (pIceAgent->iceAgentCallbacks.connectionStateChangedFn != NULL) {
-            DLOGD("Ice agent state changed from %s to %s.", iceAgentStateToString(oldState), iceAgentStateToString(pIceAgent->iceAgentState));
+            DLOGP("Ice agent state changed from %s to %s.", iceAgentStateToString(oldState), iceAgentStateToString(pIceAgent->iceAgentState));
             pIceAgent->iceAgentCallbacks.connectionStateChangedFn(pIceAgent->iceAgentCallbacks.customData, pIceAgent->iceAgentState);
         }
     } else {

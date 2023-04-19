@@ -141,7 +141,6 @@ struct __SampleStreamingSession {
     UINT64 videoTimestamp;
     CHAR peerId[MAX_SIGNALING_CLIENT_ID_LEN + 1];
     TID receiveAudioVideoSenderTid;
-    UINT64 offerReceiveTime;
     UINT64 startUpLatency;
     RtcMetricsHistory rtcMetricsHistory;
     BOOL remoteCanTrickleIce;

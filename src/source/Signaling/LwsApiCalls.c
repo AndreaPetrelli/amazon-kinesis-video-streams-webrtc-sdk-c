@@ -2155,8 +2155,11 @@ PVOID receiveLwsMessageWrapper(PVOID args)
     STATUS retStatus = STATUS_SUCCESS;
     PSignalingMessageWrapper pSignalingMessageWrapper = (PSignalingMessageWrapper) args;
     PSignalingClient pSignalingClient = NULL;
+    SIGNALING_MESSAGE_TYPE messageType = SIGNALING_MESSAGE_TYPE_UNKNOWN;
 
     CHK(pSignalingMessageWrapper != NULL, STATUS_NULL_ARG);
+
+    messageType = pSignalingMessageWrapper->receivedSignalingMessage.signalingMessage.messageType;
 
     pSignalingClient = pSignalingMessageWrapper->pSignalingClient;
 
@@ -2167,6 +2170,12 @@ PVOID receiveLwsMessageWrapper(PVOID args)
 
     // Calling client receive message callback if specified
     if (pSignalingClient->signalingClientCallbacks.messageReceivedFn != NULL) {
+        if(messageType == SIGNALING_MESSAGE_TYPE_OFFER) {
+            pSignalingClient->offerTime = GETTIME();
+        }
+        if(messageType == SIGNALING_MESSAGE_TYPE_ANSWER) {
+            PROFILE_WITH_START_TIME(pSignalingClient->offerTime, "Offer to answer time");
+        }
         CHK_STATUS(pSignalingClient->signalingClientCallbacks.messageReceivedFn(pSignalingClient->signalingClientCallbacks.customData,
                                                                                 &pSignalingMessageWrapper->receivedSignalingMessage));
     }

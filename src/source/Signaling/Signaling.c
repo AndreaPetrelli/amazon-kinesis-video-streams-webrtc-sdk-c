@@ -380,7 +380,12 @@ STATUS signalingSendMessageSync(PSignalingClient pSignalingClient, PSignalingMes
     // Perform the call
     CHK_STATUS(sendLwsMessage(pSignalingClient, pSignalingMessage->messageType, pSignalingMessage->peerClientId, pSignalingMessage->payload,
                               pSignalingMessage->payloadLen, pSignalingMessage->correlationId, 0));
-
+    if(pSignalingMessage->messageType == SIGNALING_MESSAGE_TYPE_ANSWER) {
+        PROFILE_WITH_START_TIME(pSignalingClient->offerTime, "Offer to answer time");
+    }
+    if(pSignalingMessage->messageType == SIGNALING_MESSAGE_TYPE_OFFER){
+        pSignalingClient->offerTime = GETTIME();
+    }
     // Update the internal diagnostics only after successfully sending
     ATOMIC_INCREMENT(&pSignalingClient->diagnostics.numberOfMessagesSent);
 

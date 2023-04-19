@@ -52,6 +52,7 @@ VOID onConnectionStateChange(UINT64 customData, RTC_PEER_CONNECTION_STATE newSta
     DLOGI("New connection state %u", newState);
 
     switch (newState) {
+        case RTC_PEER_CONNECTION_STATE_CONNECTING:
         case RTC_PEER_CONNECTION_STATE_CONNECTED:
             ATOMIC_STORE_BOOL(&pSampleConfiguration->connected, TRUE);
             CVAR_BROADCAST(pSampleConfiguration->cvar);
@@ -221,10 +222,8 @@ STATUS handleOffer(PSampleConfiguration pSampleConfiguration, PSampleStreamingSe
      * If remote support trickle ice, send answer now. Otherwise answer will be sent once ice candidate gathering is complete.
      */
     if (pSampleStreamingSession->remoteCanTrickleIce) {
-        PROFILE_CALL(createAnswer(pSampleStreamingSession->pPeerConnection, &pSampleStreamingSession->answerSessionDescriptionInit), "Answer generation");
+        PROFILE_CALL(CHK_STATUS(createAnswer(pSampleStreamingSession->pPeerConnection, &pSampleStreamingSession->answerSessionDescriptionInit)), "Answer generation");
         CHK_STATUS(respondWithAnswer(pSampleStreamingSession));
-        DLOGD("time taken to send answer %" PRIu64 " ms",
-              (GETTIME() - pSampleStreamingSession->offerReceiveTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
     }
 
     mediaThreadStarted = ATOMIC_EXCHANGE_BOOL(&pSampleConfiguration->mediaThreadStarted, TRUE);
@@ -319,8 +318,6 @@ VOID onIceCandidateHandler(UINT64 customData, PCHAR candidateJson)
             !pSampleStreamingSession->remoteCanTrickleIce) {
             CHK_STATUS(createAnswer(pSampleStreamingSession->pPeerConnection, &pSampleStreamingSession->answerSessionDescriptionInit));
             CHK_STATUS(respondWithAnswer(pSampleStreamingSession));
-            DLOGD("time taken to send answer %" PRIu64 " ms",
-                  (GETTIME() - pSampleStreamingSession->offerReceiveTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
         } else if (pSampleStreamingSession->pSampleConfiguration->channelInfo.channelRoleType == SIGNALING_CHANNEL_ROLE_TYPE_VIEWER &&
                    !pSampleStreamingSession->pSampleConfiguration->trickleIce) {
             CVAR_BROADCAST(pSampleStreamingSession->pSampleConfiguration->cvar);
@@ -371,7 +368,7 @@ STATUS initializePeerConnection(PSampleConfiguration pSampleConfiguration, PRtcP
         /* signalingClientGetIceConfigInfoCount can return more than one turn server. Use only one to optimize
          * candidate gathering latency. But user can also choose to use more than 1 turn server. */
         for (uriCount = 0, i = 0; i < maxTurnServer; i++) {
-            PROFILE_CALL(signalingClientGetIceConfigInfo(pSampleConfiguration->signalingClientHandle, i, &pIceConfigInfo), "Get ICE Config Info");
+            PROFILE_CALL(CHK_STATUS(signalingClientGetIceConfigInfo(pSampleConfiguration->signalingClientHandle, i, &pIceConfigInfo)), "Get ICE Config Info");
             for (j = 0; j < pIceConfigInfo->uriCount; j++) {
                 CHECK(uriCount < MAX_ICE_SERVERS_COUNT);
                 /*
@@ -408,7 +405,7 @@ STATUS initializePeerConnection(PSampleConfiguration pSampleConfiguration, PRtcP
         configuration.certificates[0] = *pRtcCertificate;
     }
 
-    PROFILE_CALL(createPeerConnection(&configuration, ppRtcPeerConnection), "Create peer connection");
+    PROFILE_CALL(CHK_STATUS(createPeerConnection(&configuration, ppRtcPeerConnection)), "Create peer connection");
 CleanUp:
 
     CHK_LOG_ERR(retStatus);
@@ -601,11 +598,6 @@ VOID sampleVideoFrameHandler(UINT64 customData, PFrame pFrame)
     UNUSED_PARAM(customData);
     DLOGV("Video Frame received. TrackId: %" PRIu64 ", Size: %u, Flags %u", pFrame->trackId, pFrame->size, pFrame->flags);
     PSampleStreamingSession pSampleStreamingSession = (PSampleStreamingSession) customData;
-    if (pSampleStreamingSession->firstFrame) {
-        pSampleStreamingSession->firstFrame = FALSE;
-        pSampleStreamingSession->startUpLatency = (GETTIME() - pSampleStreamingSession->offerReceiveTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND;
-        printf("Start up latency from offer to first video frame: %" PRIu64 "ms\n", pSampleStreamingSession->startUpLatency);
-    }
 }
 
 VOID sampleAudioFrameHandler(UINT64 customData, PFrame pFrame)
@@ -613,11 +605,6 @@ VOID sampleAudioFrameHandler(UINT64 customData, PFrame pFrame)
     UNUSED_PARAM(customData);
     DLOGV("Audio Frame received. TrackId: %" PRIu64 ", Size: %u, Flags %u", pFrame->trackId, pFrame->size, pFrame->flags);
     PSampleStreamingSession pSampleStreamingSession = (PSampleStreamingSession) customData;
-    if (pSampleStreamingSession->firstFrame) {
-        pSampleStreamingSession->firstFrame = FALSE;
-        pSampleStreamingSession->startUpLatency = (GETTIME() - pSampleStreamingSession->offerReceiveTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND;
-        printf("Start up latency from offer to first audio frame: %" PRIu64 "ms\n", pSampleStreamingSession->startUpLatency);
-    }
 }
 
 VOID sampleBandwidthEstimationHandler(UINT64 customData, DOUBLE maximumBitrate)
@@ -1314,7 +1301,6 @@ STATUS signalingMessageReceived(UINT64 customData, PReceivedSignalingMessage pRe
             }
             CHK_STATUS(createSampleStreamingSession(pSampleConfiguration, pReceivedSignalingMessage->signalingMessage.peerClientId, TRUE,
                                                     &pSampleStreamingSession));
-            pSampleStreamingSession->offerReceiveTime = GETTIME();
             MUTEX_LOCK(pSampleConfiguration->streamingSessionListReadLock);
             pSampleConfiguration->sampleStreamingSessionList[pSampleConfiguration->streamingSessionCount++] = pSampleStreamingSession;
             MUTEX_UNLOCK(pSampleConfiguration->streamingSessionListReadLock);

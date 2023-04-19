@@ -18,7 +18,7 @@ INT32 main(INT32 argc, CHAR* argv[])
 #endif
 
     // do trickleIce by default
-    printf("[KVS Master] Using trickleICE by default\n");
+    DLOGI("[KVS Master] Using trickleICE by default\n");
 
 #ifdef IOT_CORE_ENABLE_CREDENTIALS
     CHK_ERR((pChannelName = getenv(IOT_CORE_THING_NAME)) != NULL, STATUS_INVALID_OPERATION, "AWS_IOT_CORE_THING_NAME must be set");
@@ -28,17 +28,17 @@ INT32 main(INT32 argc, CHAR* argv[])
 
     retStatus = createSampleConfiguration(pChannelName, SIGNALING_CHANNEL_ROLE_TYPE_MASTER, TRUE, TRUE, &pSampleConfiguration);
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] createSampleConfiguration(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] createSampleConfiguration(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
 
-    printf("[KVS Master] Created signaling channel %s\n", pChannelName);
+    DLOGI("[KVS Master] Created signaling channel %s", pChannelName);
 
     if (pSampleConfiguration->enableFileLogging) {
         retStatus =
             createFileLogger(FILE_LOGGING_BUFFER_SIZE, MAX_NUMBER_OF_LOG_FILES, (PCHAR) FILE_LOGGER_LOG_FILE_DIRECTORY_PATH, TRUE, TRUE, NULL);
         if (retStatus != STATUS_SUCCESS) {
-            printf("[KVS Master] createFileLogger(): operation returned status code: 0x%08x \n", retStatus);
+            DLOGW("[KVS Master] createFileLogger(): operation returned status code: 0x%08x", retStatus);
             pSampleConfiguration->enableFileLogging = FALSE;
         }
     }
@@ -49,79 +49,79 @@ INT32 main(INT32 argc, CHAR* argv[])
     pSampleConfiguration->receiveAudioVideoSource = sampleReceiveAudioVideoFrame;
     pSampleConfiguration->onDataChannel = onDataChannel;
     pSampleConfiguration->mediaType = SAMPLE_STREAMING_AUDIO_VIDEO;
-    printf("[KVS Master] Finished setting audio and video handlers\n");
+    DLOGI("[KVS Master] Finished setting audio and video handlers");
 
     // Check if the samples are present
 
     retStatus = readFrameFromDisk(NULL, &frameSize, "./h264SampleFrames/frame-0001.h264");
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
-    printf("[KVS Master] Checked sample video frame availability....available\n");
+    DLOGI("[KVS Master] Checked sample video frame availability....available");
 
     retStatus = readFrameFromDisk(NULL, &frameSize, "./opusSampleFrames/sample-001.opus");
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
-    printf("[KVS Master] Checked sample audio frame availability....available\n");
+    DLOGI("[KVS Master] Checked sample audio frame availability....available");
 
     // Initialize KVS WebRTC. This must be done before anything else, and must only be done once.
     retStatus = initKvsWebRtc();
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] initKvsWebRtc(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] initKvsWebRtc(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
-    printf("[KVS Master] KVS WebRTC initialization completed successfully\n");
+    DLOGI("[KVS Master] KVS WebRTC initialization completed successfully");
 
     pSampleConfiguration->signalingClientCallbacks.messageReceivedFn = signalingMessageReceived;
 
-    strcpy(pSampleConfiguration->clientInfo.clientId, SAMPLE_MASTER_CLIENT_ID);
+    STRCPY(pSampleConfiguration->clientInfo.clientId, SAMPLE_MASTER_CLIENT_ID);
 
     retStatus = createSignalingClientSync(&pSampleConfiguration->clientInfo, &pSampleConfiguration->channelInfo,
                                           &pSampleConfiguration->signalingClientCallbacks, pSampleConfiguration->pCredentialProvider,
                                           &pSampleConfiguration->signalingClientHandle);
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] createSignalingClientSync(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] createSignalingClientSync(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
-    printf("[KVS Master] Signaling client created successfully\n");
+    DLOGI("[KVS Master] Signaling client created successfully");
 
     // Enable the processing of the messages
     retStatus = signalingClientFetchSync(pSampleConfiguration->signalingClientHandle);
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] signalingClientFetchSync(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] signalingClientFetchSync(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
 
     retStatus = signalingClientConnectSync(pSampleConfiguration->signalingClientHandle);
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] signalingClientConnectSync(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] signalingClientConnectSync(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
-    printf("[KVS Master] Signaling client connection to socket established\n");
+    DLOGI("[KVS Master] Signaling client connection to socket established");
 
     gSampleConfiguration = pSampleConfiguration;
 
-    printf("[KVS Master] Channel %s set up done \n", pChannelName);
+    DLOGI("[KVS Master] Channel %s set up done ", pChannelName);
 
     // Checking for termination
     retStatus = sessionCleanupWait(pSampleConfiguration);
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] sessionCleanupWait(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] sessionCleanupWait(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
 
-    printf("[KVS Master] Streaming session terminated\n");
+    DLOGI("[KVS Master] Streaming session terminated");
 
 CleanUp:
 
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] Terminated with status code 0x%08x\n", retStatus);
+        DLOGE("[KVS Master] Terminated with status code 0x%08x", retStatus);
     }
 
-    printf("[KVS Master] Cleaning up....\n");
+    DLOGI("[KVS Master] Cleaning up....");
     if (pSampleConfiguration != NULL) {
         // Kick of the termination sequence
         ATOMIC_STORE_BOOL(&pSampleConfiguration->appTerminateFlag, TRUE);
@@ -137,19 +137,19 @@ CleanUp:
         if (retStatus == STATUS_SUCCESS) {
             logSignalingClientStats(&signalingClientMetrics);
         } else {
-            printf("[KVS Master] signalingClientGetMetrics() operation returned status code: 0x%08x\n", retStatus);
+            DLOGE("[KVS Master] signalingClientGetMetrics() operation returned status code: 0x%08x", retStatus);
         }
         retStatus = freeSignalingClient(&pSampleConfiguration->signalingClientHandle);
         if (retStatus != STATUS_SUCCESS) {
-            printf("[KVS Master] freeSignalingClient(): operation returned status code: 0x%08x", retStatus);
+            DLOGE("[KVS Master] freeSignalingClient(): operation returned status code: 0x%08x", retStatus);
         }
 
         retStatus = freeSampleConfiguration(&pSampleConfiguration);
         if (retStatus != STATUS_SUCCESS) {
-            printf("[KVS Master] freeSampleConfiguration(): operation returned status code: 0x%08x", retStatus);
+            DLOGE("[KVS Master] freeSampleConfiguration(): operation returned status code: 0x%08x", retStatus);
         }
     }
-    printf("[KVS Master] Cleanup done\n");
+    DLOGI("[KVS Master] Cleanup done");
     CHK_LOG_ERR(retStatus);
 
     RESET_INSTRUMENTED_ALLOCATORS();
@@ -168,7 +168,7 @@ STATUS readFrameFromDisk(PBYTE pFrame, PUINT32 pSize, PCHAR frameFilePath)
     UINT64 size = 0;
 
     if (pSize == NULL) {
-        printf("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", STATUS_NULL_ARG);
+        DLOGE("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", STATUS_NULL_ARG);
         goto CleanUp;
     }
 
@@ -177,7 +177,7 @@ STATUS readFrameFromDisk(PBYTE pFrame, PUINT32 pSize, PCHAR frameFilePath)
     // Get the size and read into frame
     retStatus = readFile(frameFilePath, TRUE, pFrame, &size);
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] readFile(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] readFile(): operation returned status code: 0x%08x \n", retStatus);
         goto CleanUp;
     }
 
@@ -204,7 +204,7 @@ PVOID sendVideoPackets(PVOID args)
     MEMSET(&encoderStats, 0x00, SIZEOF(RtcEncoderStats));
 
     if (pSampleConfiguration == NULL) {
-        printf("[KVS Master] sendVideoPackets(): operation returned status code: 0x%08x \n", STATUS_NULL_ARG);
+        DLOGE("[KVS Master] sendVideoPackets(): operation returned status code: 0x%08x \n", STATUS_NULL_ARG);
         goto CleanUp;
     }
 
@@ -214,11 +214,11 @@ PVOID sendVideoPackets(PVOID args)
 
     while (!ATOMIC_LOAD_BOOL(&pSampleConfiguration->appTerminateFlag)) {
         fileIndex = fileIndex % NUMBER_OF_H264_FRAME_FILES + 1;
-        snprintf(filePath, MAX_PATH_LEN, "./h264SampleFrames/frame-%04d.h264", fileIndex);
+        SNPRINTF(filePath, MAX_PATH_LEN, "./h264SampleFrames/frame-%04d.h264", fileIndex);
 
         retStatus = readFrameFromDisk(NULL, &frameSize, filePath);
         if (retStatus != STATUS_SUCCESS) {
-            printf("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", retStatus);
+            DLOGE("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", retStatus);
             goto CleanUp;
         }
 
@@ -226,8 +226,8 @@ PVOID sendVideoPackets(PVOID args)
         if (frameSize > pSampleConfiguration->videoBufferSize) {
             pSampleConfiguration->pVideoFrameBuffer = (PBYTE) MEMREALLOC(pSampleConfiguration->pVideoFrameBuffer, frameSize);
             if (pSampleConfiguration->pVideoFrameBuffer == NULL) {
-                printf("[KVS Master] Video frame Buffer reallocation failed...%s (code %d)\n", strerror(errno), errno);
-                printf("[KVS Master] MEMREALLOC(): operation returned status code: 0x%08x \n", STATUS_NOT_ENOUGH_MEMORY);
+                DLOGE("[KVS Master] Video frame Buffer reallocation failed...%s (code %d)\n", strerror(errno), errno);
+                DLOGE("[KVS Master] MEMREALLOC(): operation returned status code: 0x%08x \n", STATUS_NOT_ENOUGH_MEMORY);
                 goto CleanUp;
             }
 
@@ -239,7 +239,7 @@ PVOID sendVideoPackets(PVOID args)
 
         retStatus = readFrameFromDisk(frame.frameData, &frameSize, filePath);
         if (retStatus != STATUS_SUCCESS) {
-            printf("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", retStatus);
+            DLOGE("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", retStatus);
             goto CleanUp;
         }
 
@@ -252,17 +252,14 @@ PVOID sendVideoPackets(PVOID args)
         MUTEX_LOCK(pSampleConfiguration->streamingSessionListReadLock);
         for (i = 0; i < pSampleConfiguration->streamingSessionCount; ++i) {
             status = writeFrame(pSampleConfiguration->sampleStreamingSessionList[i]->pVideoRtcRtpTransceiver, &frame);
-            if(pSampleConfiguration->sampleStreamingSessionList[i]->firstFrame) {
+            if(pSampleConfiguration->sampleStreamingSessionList[i]->firstFrame && status == STATUS_SUCCESS) {
                 pSampleConfiguration->sampleStreamingSessionList[i]->firstFrame = FALSE;
-                DLOGD("[Time to first frame] Time taken: %" PRIu64 " ms", (GETTIME() - pSampleConfiguration->sampleStreamingSessionList[i]->offerReceiveTime) / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
             }
             encoderStats.encodeTimeMsec = 4; // update encode time to an arbitrary number to demonstrate stats update
             updateEncoderStats(pSampleConfiguration->sampleStreamingSessionList[i]->pVideoRtcRtpTransceiver, &encoderStats);
             if (status != STATUS_SRTP_NOT_READY_YET) {
                 if (status != STATUS_SUCCESS) {
-#ifdef VERBOSE
-                    printf("writeFrame() failed with 0x%08x\n", status);
-#endif
+                    DLOGV("writeFrame() failed with 0x%08x", status);
                 }
             }
         }
@@ -278,7 +275,7 @@ PVOID sendVideoPackets(PVOID args)
     }
 
 CleanUp:
-    printf("[KVS Master] closing video thread");
+    DLOGI("[KVS Master] closing video thread");
     CHK_LOG_ERR(retStatus);
 
     return (PVOID) (ULONG_PTR) retStatus;
@@ -295,7 +292,7 @@ PVOID sendAudioPackets(PVOID args)
     STATUS status;
 
     if (pSampleConfiguration == NULL) {
-        printf("[KVS Master] sendAudioPackets(): operation returned status code: 0x%08x \n", STATUS_NULL_ARG);
+        DLOGE("[KVS Master] sendAudioPackets(): operation returned status code: 0x%08x", STATUS_NULL_ARG);
         goto CleanUp;
     }
 
@@ -303,11 +300,11 @@ PVOID sendAudioPackets(PVOID args)
 
     while (!ATOMIC_LOAD_BOOL(&pSampleConfiguration->appTerminateFlag)) {
         fileIndex = fileIndex % NUMBER_OF_OPUS_FRAME_FILES + 1;
-        snprintf(filePath, MAX_PATH_LEN, "./opusSampleFrames/sample-%03d.opus", fileIndex);
+        SNPRINTF(filePath, MAX_PATH_LEN, "./opusSampleFrames/sample-%03d.opus", fileIndex);
 
         retStatus = readFrameFromDisk(NULL, &frameSize, filePath);
         if (retStatus != STATUS_SUCCESS) {
-            printf("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", retStatus);
+            DLOGE("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x", retStatus);
             goto CleanUp;
         }
 
@@ -315,8 +312,8 @@ PVOID sendAudioPackets(PVOID args)
         if (frameSize > pSampleConfiguration->audioBufferSize) {
             pSampleConfiguration->pAudioFrameBuffer = (UINT8*) MEMREALLOC(pSampleConfiguration->pAudioFrameBuffer, frameSize);
             if (pSampleConfiguration->pAudioFrameBuffer == NULL) {
-                printf("[KVS Master] Audio frame Buffer reallocation failed...%s (code %d)\n", strerror(errno), errno);
-                printf("[KVS Master] MEMREALLOC(): operation returned status code: 0x%08x \n", STATUS_NOT_ENOUGH_MEMORY);
+                DLOGE("[KVS Master] Audio frame Buffer reallocation failed...%s (code %d)", strerror(errno), errno);
+                DLOGE("[KVS Master] MEMREALLOC(): operation returned status code: 0x%08x ", STATUS_NOT_ENOUGH_MEMORY);
                 goto CleanUp;
             }
             pSampleConfiguration->audioBufferSize = frameSize;
@@ -327,7 +324,7 @@ PVOID sendAudioPackets(PVOID args)
 
         retStatus = readFrameFromDisk(frame.frameData, &frameSize, filePath);
         if (retStatus != STATUS_SUCCESS) {
-            printf("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x \n", retStatus);
+            DLOGE("[KVS Master] readFrameFromDisk(): operation returned status code: 0x%08x", retStatus);
             goto CleanUp;
         }
 
@@ -338,9 +335,7 @@ PVOID sendAudioPackets(PVOID args)
             status = writeFrame(pSampleConfiguration->sampleStreamingSessionList[i]->pAudioRtcRtpTransceiver, &frame);
             if (status != STATUS_SRTP_NOT_READY_YET) {
                 if (status != STATUS_SUCCESS) {
-#ifdef VERBOSE
-                    printf("writeFrame() failed with 0x%08x\n", status);
-#endif
+                    DLOGV("writeFrame() failed with 0x%08x", status);
                 }
             }
         }
@@ -349,7 +344,7 @@ PVOID sendAudioPackets(PVOID args)
     }
 
 CleanUp:
-    printf("[KVS Master] closing audio thread");
+    DLOGI("[KVS Master] closing audio thread");
     return (PVOID) (ULONG_PTR) retStatus;
 }
 
@@ -358,19 +353,19 @@ PVOID sampleReceiveAudioVideoFrame(PVOID args)
     STATUS retStatus = STATUS_SUCCESS;
     PSampleStreamingSession pSampleStreamingSession = (PSampleStreamingSession) args;
     if (pSampleStreamingSession == NULL) {
-        printf("[KVS Master] sampleReceiveAudioVideoFrame(): operation returned status code: 0x%08x \n", STATUS_NULL_ARG);
+        DLOGE("[KVS Master] sampleReceiveAudioVideoFrame(): operation returned status code: 0x%08x", STATUS_NULL_ARG);
         goto CleanUp;
     }
 
     retStatus = transceiverOnFrame(pSampleStreamingSession->pVideoRtcRtpTransceiver, (UINT64) pSampleStreamingSession, sampleVideoFrameHandler);
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] transceiverOnFrame(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] transceiverOnFrame(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
 
     retStatus = transceiverOnFrame(pSampleStreamingSession->pAudioRtcRtpTransceiver, (UINT64) pSampleStreamingSession, sampleAudioFrameHandler);
     if (retStatus != STATUS_SUCCESS) {
-        printf("[KVS Master] transceiverOnFrame(): operation returned status code: 0x%08x \n", retStatus);
+        DLOGE("[KVS Master] transceiverOnFrame(): operation returned status code: 0x%08x", retStatus);
         goto CleanUp;
     }
 

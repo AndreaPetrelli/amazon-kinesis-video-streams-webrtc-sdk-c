@@ -40,8 +40,12 @@ STATUS createIceAgent(PCHAR username, PCHAR password, PIceAgentCallbacks pIceAge
     STRNCPY(pIceAgent->localUsername, username, MAX_ICE_CONFIG_USER_NAME_LEN);
     STRNCPY(pIceAgent->localPassword, password, MAX_ICE_CONFIG_CREDENTIAL_LEN);
 
-
-
+    ATOMIC_STORE_BOOL(&pIceAgent->remoteCredentialReceived, FALSE);
+    ATOMIC_STORE_BOOL(&pIceAgent->agentStartGathering, FALSE);
+    ATOMIC_STORE_BOOL(&pIceAgent->candidateGatheringFinished, FALSE);
+    ATOMIC_STORE_BOOL(&pIceAgent->shutdown, FALSE);
+    ATOMIC_STORE_BOOL(&pIceAgent->restart, FALSE);
+    ATOMIC_STORE_BOOL(&pIceAgent->processStun, TRUE);
     pIceAgent->isControlling = FALSE;
     pIceAgent->tieBreaker = (UINT64) RAND();
     pIceAgent->iceTransportPolicy = pRtcConfiguration->iceTransportPolicy;
@@ -88,23 +92,29 @@ STATUS createIceAgent(PCHAR username, PCHAR password, PIceAgentCallbacks pIceAge
 
     pIceAgent->iceServersCount = 0;
     for (i = 0; i < MAX_ICE_SERVERS_COUNT; i++) {
-        if (pRtcConfiguration->iceServers[i].urls[0] != '\0' &&
-            STATUS_SUCCEEDED(parseIceServer(&pIceAgent->iceServers[pIceAgent->iceServersCount], (PCHAR) pRtcConfiguration->iceServers[i].urls,
-                                            (PCHAR) pRtcConfiguration->iceServers[i].username,
-                                            (PCHAR) pRtcConfiguration->iceServers[i].credential))) {
-            pIceAgent->rtcIceServerDiagnostics[i].port = (INT32) getInt16(pIceAgent->iceServers[i].ipAddress.port);
-            switch (pIceAgent->iceServers[pIceAgent->iceServersCount].transport) {
-                case KVS_SOCKET_PROTOCOL_UDP:
-                    STRCPY(pIceAgent->rtcIceServerDiagnostics[i].protocol, ICE_TRANSPORT_TYPE_UDP);
-                    break;
-                case KVS_SOCKET_PROTOCOL_TCP:
-                    STRCPY(pIceAgent->rtcIceServerDiagnostics[i].protocol, ICE_TRANSPORT_TYPE_TCP);
-                    break;
-                default:
-                    MEMSET(pIceAgent->rtcIceServerDiagnostics[i].protocol, 0, SIZEOF(pIceAgent->rtcIceServerDiagnostics[i].protocol));
+        if (pRtcConfiguration->iceServers[i].urls[0] != '\0') {
+            PROFILE_CALL(retStatus = parseIceServer(&pIceAgent->iceServers[pIceAgent->iceServersCount],
+                                                         (PCHAR) pRtcConfiguration->iceServers[i].urls,
+                                                         (PCHAR) pRtcConfiguration->iceServers[i].username,
+                                                         (PCHAR) pRtcConfiguration->iceServers[i].credential), "ICE server parsing");
+            if(STATUS_SUCCEEDED(retStatus)) {
+                pIceAgent->rtcIceServerDiagnostics[i].port = (INT32) getInt16(pIceAgent->iceServers[i].ipAddress.port);
+                switch (pIceAgent->iceServers[pIceAgent->iceServersCount].transport) {
+                    case KVS_SOCKET_PROTOCOL_UDP:
+                        STRCPY(pIceAgent->rtcIceServerDiagnostics[i].protocol, ICE_TRANSPORT_TYPE_UDP);
+                        break;
+                    case KVS_SOCKET_PROTOCOL_TCP:
+                        STRCPY(pIceAgent->rtcIceServerDiagnostics[i].protocol, ICE_TRANSPORT_TYPE_TCP);
+                        break;
+                    default:
+                        MEMSET(pIceAgent->rtcIceServerDiagnostics[i].protocol, 0, SIZEOF(pIceAgent->rtcIceServerDiagnostics[i].protocol));
+                }
+                STRCPY(pIceAgent->rtcIceServerDiagnostics[i].url, pRtcConfiguration->iceServers[i].urls);
+                pIceAgent->iceServersCount++;
             }
-            STRCPY(pIceAgent->rtcIceServerDiagnostics[i].url, pRtcConfiguration->iceServers[i].urls);
-            pIceAgent->iceServersCount++;
+            else {
+                DLOGE("Failed to parse ICE servers");
+            }
         }
     }
 
@@ -506,7 +516,6 @@ STATUS iceAgentInitHostCandidate(PIceAgent pIceAgent)
             CHK_STATUS(connectionListenerAddConnection(pIceAgent->pConnectionListener, pNewIceCandidate->pSocketConnection));
         }
     }
-
     CHK(localCandidateCount != 0, STATUS_ICE_NO_LOCAL_HOST_CANDIDATE_AVAILABLE);
 
 CleanUp:
@@ -581,12 +590,13 @@ STATUS iceAgentStartGathering(PIceAgent pIceAgent)
     CHK(!ATOMIC_LOAD_BOOL(&pIceAgent->agentStartGathering), retStatus);
 
     ATOMIC_STORE_BOOL(&pIceAgent->agentStartGathering, TRUE);
+    pIceAgent->candidateGatheringStartTime = GETTIME();
 
     // skip gathering host candidate and srflx candidate if relay only
     if (pIceAgent->iceTransportPolicy != ICE_TRANSPORT_POLICY_RELAY) {
         // Skip getting local host candidates if transport policy is relay only
-        PROFILE_CALL(getLocalhostIpAddresses(pIceAgent->localNetworkInterfaces, &pIceAgent->localNetworkInterfaceCount,
-                                                        pIceAgent->kvsRtcConfiguration.iceSetInterfaceFilterFunc, pIceAgent->kvsRtcConfiguration.filterCustomData), "Candidate gathering");
+        PROFILE_CALL(CHK_STATUS(getLocalhostIpAddresses(pIceAgent->localNetworkInterfaces, &pIceAgent->localNetworkInterfaceCount,
+                                                        pIceAgent->kvsRtcConfiguration.iceSetInterfaceFilterFunc, pIceAgent->kvsRtcConfiguration.filterCustomData)), "Host candidate gathering from local interfaces");
         CHK_STATUS(iceAgentInitHostCandidate(pIceAgent));
         CHK_STATUS(iceAgentInitSrflxCandidate(pIceAgent));
     }
@@ -1049,11 +1059,13 @@ STATUS createIceCandidatePairs(PIceAgent pIceAgent, PIceCandidate pIceCandidate,
             CHK(pIceCandidatePair != NULL, STATUS_NOT_ENOUGH_MEMORY);
 
             if (isRemoteCandidate) {
-                pIceCandidatePair->local = (PIceCandidate) data;
+                // Since we pick local candidate list
+                pIceCandidatePair->local = pCurrentIceCandidate;
                 pIceCandidatePair->remote = pIceCandidate;
             } else {
                 pIceCandidatePair->local = pIceCandidate;
-                pIceCandidatePair->remote = (PIceCandidate) data;
+                // Since we pick remote candidate list
+                pIceCandidatePair->remote = pCurrentIceCandidate;
             }
             pIceCandidatePair->nominated = FALSE;
 
@@ -1248,10 +1260,10 @@ STATUS iceCandidatePairCheckConnection(PStunPacket pStunBindingRequest, PIceAgen
     transactionIdStoreInsert(pIceCandidatePair->pTransactionIdStore, pStunBindingRequest->header.transactionId);
     checkSum = COMPUTE_CRC32(pStunBindingRequest->header.transactionId, ARRAY_SIZE(pStunBindingRequest->header.transactionId));
     CHK_STATUS(hashTableUpsert(pIceCandidatePair->requestSentTime, checkSum, GETTIME()));
+    CHK_STATUS(hashTableUpsert(pIceAgent->requestTimestampDiagnostics, checkSum, GETTIME()));
 
     if (pIceCandidatePair->local->iceCandidateType == ICE_CANDIDATE_TYPE_RELAYED) {
         pIceAgent->rtcIceServerDiagnostics[pIceCandidatePair->local->iceServerIndex].totalRequestsSent++;
-        CHK_STATUS(hashTableUpsert(pIceAgent->requestTimestampDiagnostics, checkSum, GETTIME()));
     }
 
     CHK_STATUS(iceAgentSendStunPacket(pStunBindingRequest, (PBYTE) pIceAgent->remotePassword,
@@ -1358,6 +1370,7 @@ STATUS iceAgentSendSrflxCandidateRequest(PIceAgent pIceAgent)
     PStunPacket pBindingRequest = NULL;
     UINT64 checkSum = 0;
 
+    UINT32 count;
     CHK(pIceAgent != NULL, STATUS_NULL_ARG);
 
     // Assume holding pIceAgent->lock
@@ -1543,6 +1556,17 @@ STATUS iceAgentGatherCandidateTimerCallback(UINT32 timerId, UINT64 currentTime, 
                 CHK_STATUS(createIceCandidatePairs(pIceAgent, pIceCandidate, FALSE));
             }
         }
+
+        // If the candidate has moved to valid state, then we can report it and start creating pairs with
+        // srflx candidates.
+        else if (pIceCandidate->state == ICE_CANDIDATE_STATE_VALID && !pIceCandidate->reported) {
+            newLocalCandidates[newLocalCandidateCount++] = *pIceCandidate;
+            pIceCandidate->reported = TRUE;
+
+            if (pIceCandidate->iceCandidateType == ICE_CANDIDATE_TYPE_SERVER_REFLEXIVE) {
+                CHK_STATUS(createIceCandidatePairs(pIceAgent, pIceCandidate, FALSE));
+            }
+        }
     }
 
     /* keep sending binding request if there is still pending srflx candidate */
@@ -1552,25 +1576,9 @@ STATUS iceAgentGatherCandidateTimerCallback(UINT32 timerId, UINT64 currentTime, 
 
     /* stop scheduling if there is no more pending candidate or if timeout is reached. */
     if ((totalCandidateCount > 0 && pendingCandidateCount == 0) || currentTime >= pIceAgent->candidateGatheringEndTime) {
-        DLOGD("Candidate gathering completed.");
+        DLOGI("Candidate gathering completed.");
         stopScheduling = TRUE;
         pIceAgent->iceCandidateGatheringTimerTask = MAX_UINT32;
-    }
-
-    CHK_STATUS(doubleListGetHeadNode(pIceAgent->localCandidates, &pCurNode));
-    while (pCurNode != NULL && newLocalCandidateCount < ARRAY_SIZE(newLocalCandidates)) {
-        CHK_STATUS(doubleListGetNodeData(pCurNode, &data));
-        pCurNode = pCurNode->pNext;
-        pIceCandidate = (PIceCandidate) data;
-
-        if (pIceCandidate->state == ICE_CANDIDATE_STATE_VALID && !pIceCandidate->reported) {
-            newLocalCandidates[newLocalCandidateCount++] = *pIceCandidate;
-            pIceCandidate->reported = TRUE;
-
-            if (pIceCandidate->iceCandidateType == ICE_CANDIDATE_TYPE_SERVER_REFLEXIVE) {
-                CHK_STATUS(createIceCandidatePairs(pIceAgent, pIceCandidate, FALSE));
-            }
-        }
     }
 
     MUTEX_UNLOCK(pIceAgent->lock);
@@ -1584,6 +1592,7 @@ STATUS iceAgentGatherCandidateTimerCallback(UINT32 timerId, UINT64 currentTime, 
 
     if (stopScheduling) {
         ATOMIC_STORE_BOOL(&pIceAgent->candidateGatheringFinished, TRUE);
+        PROFILE_WITH_START_TIME(pIceAgent->candidateGatheringStartTime, "Candidate gathering time");
         /* notify that candidate gathering is finished. */
         if (pIceAgent->iceAgentCallbacks.newLocalCandidateFn != NULL) {
             pIceAgent->iceAgentCallbacks.newLocalCandidateFn(pIceAgent->iceAgentCallbacks.customData, NULL);
@@ -1657,7 +1666,7 @@ STATUS iceAgentInitSrflxCandidate(PIceAgent pIceAgent)
     PIceCandidate pCandidate = NULL, pNewCandidate = NULL;
     UINT32 j, srflxCount = 0;
     BOOL locked = FALSE;
-    PIceCandidate srflsCandidates[KVS_ICE_MAX_LOCAL_CANDIDATE_COUNT];
+    PIceCandidate srflxCandidates[KVS_ICE_MAX_LOCAL_CANDIDATE_COUNT];
 
     CHK(pIceAgent != NULL, STATUS_NULL_ARG);
 
@@ -1693,7 +1702,7 @@ STATUS iceAgentInitSrflxCandidate(PIceAgent pIceAgent)
                     CHK_STATUS(doubleListInsertItemHead(pIceAgent->localCandidates, (UINT64) pNewCandidate));
 
                     // Store the pointer so we can start the connection listener outside the locks
-                    srflsCandidates[srflxCount++] = pNewCandidate;
+                    srflxCandidates[srflxCount++] = pNewCandidate;
 
                     pNewCandidate = NULL;
                 }
@@ -1706,7 +1715,7 @@ STATUS iceAgentInitSrflxCandidate(PIceAgent pIceAgent)
 
     // Create and start the connection listener outside of the locks
     for (j = 0; j < srflxCount; j++) {
-        pCandidate = srflsCandidates[j];
+        pCandidate = srflxCandidates[j];
         // TODO: IPv6 STUN is not supported at the moment. Remove this check if the support is added in the future
         if(IS_IPV4_ADDR(&(pCandidate->ipAddress))) {
             // open up a new socket at host candidate's ip address for server reflex candidate.
@@ -2136,9 +2145,10 @@ STATUS iceAgentReadyStateSetup(PIceAgent pIceAgent)
 
     pIceAgent->pDataSendingIceCandidatePair = pNominatedAndValidCandidatePair;
     CHK_STATUS(getIpAddrStr(&pIceAgent->pDataSendingIceCandidatePair->local->ipAddress, ipAddrStr, ARRAY_SIZE(ipAddrStr)));
-    DLOGD("Selected pair %s_%s, local candidate type: %s. Round trip time %u ms. Local candidate priority: %u, ice candidate pair priority: %" PRIu64,
+    DLOGP("Selected pair %s_%s, local candidate type: %s. remote candidate type: %s. Round trip time %u ms. Local candidate priority: %u, ice candidate pair priority: %" PRIu64,
           pIceAgent->pDataSendingIceCandidatePair->local->id, pIceAgent->pDataSendingIceCandidatePair->remote->id,
           iceAgentGetCandidateTypeStr(pIceAgent->pDataSendingIceCandidatePair->local->iceCandidateType),
+          iceAgentGetCandidateTypeStr(pIceAgent->pDataSendingIceCandidatePair->remote->iceCandidateType),
           pIceAgent->pDataSendingIceCandidatePair->roundTripTime / HUNDREDS_OF_NANOS_IN_A_MILLISECOND,
           pIceAgent->pDataSendingIceCandidatePair->local->priority, pIceAgent->pDataSendingIceCandidatePair->priority);
 
@@ -2413,6 +2423,7 @@ STATUS handleStunPacket(PIceAgent pIceAgent, PBYTE pBuffer, UINT32 bufferLen, PS
     UINT64 connectivityCheckRequestsReceived = 0;
     UINT64 connectivityCheckResponsesSent = 0;
     UINT64 connectivityCheckResponsesReceived = 0;
+    UINT32 count = 0;
 
     // need to determine stunPacketType before deserializing because different password should be used depending on the packet type
     stunPacketType = (UINT16) getInt16(*((PUINT16) pBuffer));
@@ -2476,14 +2487,12 @@ STATUS handleStunPacket(PIceAgent pIceAgent, PBYTE pBuffer, UINT32 bufferLen, PS
 
                 // Update round trip time for serial reflexive candidate
                 pIceAgent->rtcIceServerDiagnostics[pIceCandidate->iceServerIndex].totalResponsesReceived++;
-                retStatus = hashTableGet(pIceAgent->requestTimestampDiagnostics, checkSum, &requestSentTime);
-                if (retStatus != STATUS_SUCCESS) {
-                    DLOGW("Unable to fetch request Timestamp from the hash table. No update to totalRoundTripTime (error code: 0x%08x), "
-                          "stunBindingRequest",
-                          retStatus);
-                } else {
+                // Transaction ID count be same for candidates coming from same interface, which means there would only
+                // be one entry. It is not necessary to update a return sttaus since it is not indicative of a failure
+                if ((hashTableGet(pIceAgent->requestTimestampDiagnostics, checkSum, &requestSentTime)) == STATUS_SUCCESS) {
                     pIceAgent->rtcIceServerDiagnostics[pIceCandidate->iceServerIndex].totalRoundTripTime += GETTIME() - requestSentTime;
                     CHK_STATUS(hashTableRemove(pIceAgent->requestTimestampDiagnostics, checkSum));
+                    hashTableGetCount(pIceAgent->requestTimestampDiagnostics, &count);
                 }
 
                 CHK_STATUS(deserializeStunPacket(pBuffer, bufferLen, NULL, 0, &pStunPacket));
@@ -2509,10 +2518,7 @@ STATUS handleStunPacket(PIceAgent pIceAgent, PBYTE pBuffer, UINT32 bufferLen, PS
                          ipAddrStr2, ipAddrStr);
             }
             DLOGV("Pair binding response! %s %s", pIceCandidatePair->local->id, pIceCandidatePair->remote->id);
-            retStatus = hashTableGet(pIceCandidatePair->requestSentTime, checkSum, &requestSentTime);
-            if (retStatus != STATUS_SUCCESS) {
-                DLOGW("Unable to fetch request Timestamp from the hash table. No update to RTT for the pair (error code: 0x%08x)", retStatus);
-            } else {
+            if (hashTableGet(pIceCandidatePair->requestSentTime, checkSum, &requestSentTime) == STATUS_SUCCESS) {
                 pIceCandidatePair->roundTripTime = GETTIME() - requestSentTime;
                 pIceCandidatePair->rtcIceCandidatePairDiagnostics.currentRoundTripTime =
                     (DOUBLE) (pIceCandidatePair->roundTripTime) / HUNDREDS_OF_NANOS_IN_A_SECOND;
@@ -2524,10 +2530,7 @@ STATUS handleStunPacket(PIceAgent pIceAgent, PBYTE pBuffer, UINT32 bufferLen, PS
             if (pIceCandidatePair->local->iceCandidateType == ICE_CANDIDATE_TYPE_RELAYED) {
                 pIceAgent->rtcIceServerDiagnostics[pIceCandidatePair->local->iceServerIndex].totalResponsesReceived++;
                 retStatus = hashTableGet(pIceAgent->requestTimestampDiagnostics, checkSum, &requestSentTime);
-                if (retStatus != STATUS_SUCCESS) {
-                    DLOGW("Unable to fetch request Timestamp from the hash table. No update to totalRoundTripTime (error code: 0x%08x), typeRelayed",
-                          retStatus);
-                } else {
+                if (hashTableGet(pIceAgent->requestTimestampDiagnostics, checkSum, &requestSentTime) == STATUS_SUCCESS) {
                     pIceAgent->rtcIceServerDiagnostics[pIceCandidatePair->local->iceServerIndex].totalRoundTripTime += GETTIME() - requestSentTime;
                     CHK_STATUS(hashTableRemove(pIceAgent->requestTimestampDiagnostics, checkSum));
                 }
@@ -2554,14 +2557,10 @@ STATUS handleStunPacket(PIceAgent pIceAgent, PBYTE pBuffer, UINT32 bufferLen, PS
             }
 
             if (pIceCandidatePair->state != ICE_CANDIDATE_PAIR_STATE_SUCCEEDED) {
-                DLOGV("Pair succeeded! %s %s", pIceCandidatePair->local->id, pIceCandidatePair->remote->id);
+                DLOGD("Pair succeeded! %s %s", pIceCandidatePair->local->id, pIceCandidatePair->remote->id);
                 pIceCandidatePair->state = ICE_CANDIDATE_PAIR_STATE_SUCCEEDED;
                 retStatus = hashTableGet(pIceCandidatePair->requestSentTime, checkSum, &requestSentTime);
-                if (retStatus != STATUS_SUCCESS) {
-                    DLOGW(
-                        "Unable to fetch request Timestamp from the hash table. No update to totalRoundTripTime (error code: 0x%08x), stateSucceeded",
-                        retStatus);
-                } else {
+                if (hashTableGet(pIceCandidatePair->requestSentTime, checkSum, &requestSentTime) == STATUS_SUCCESS) {
                     pIceCandidatePair->roundTripTime = GETTIME() - requestSentTime;
                     DLOGD("Ice candidate pair %s_%s is connected. Round trip time: %" PRIu64 "ms", pIceCandidatePair->local->id,
                           pIceCandidatePair->remote->id, pIceCandidatePair->roundTripTime / HUNDREDS_OF_NANOS_IN_A_MILLISECOND);
@@ -2772,6 +2771,7 @@ UINT64 computeCandidatePairPriority(PIceCandidatePair pIceCandidatePair, BOOL is
     UINT64 controllingAgentCandidatePri = pIceCandidatePair->local->priority;
     UINT64 controlledAgentCandidatePri = pIceCandidatePair->remote->priority;
 
+    // Swap if SDK is used as master peer
     if (!isLocalControlling) {
         controllingAgentCandidatePri = controlledAgentCandidatePri;
         controlledAgentCandidatePri = pIceCandidatePair->local->priority;
